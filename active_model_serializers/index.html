@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+
+  <head>
+    <meta charset="utf-8">
+
+    <title>ActiveModel::Serializers</title>
+
+    <meta name="author" content="Jean Boussier">
+
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+    <link rel="stylesheet" href="css/reveal.min.css">
+    <link rel="stylesheet" href="css/theme/default.css" id="theme">
+
+    <!-- For syntax highlighting -->
+    <link rel="stylesheet" href="lib/css/zenburn.css">
+
+    <!-- If the query includes 'print-pdf', use the PDF print sheet -->
+    <script>
+      document.write( '<link rel="stylesheet" href="css/print/' + ( window.location.search.match( /print-pdf/gi ) ? 'pdf' : 'paper' ) + '.css" type="text/css" media="print">' );
+    </script>
+
+    <!--[if lt IE 9]>
+    <script src="lib/js/html5shiv.js"></script>
+    <![endif]-->
+  </head>
+
+  <body>
+
+    <div class="reveal">
+
+      <!-- Any section element inside of this container is displayed as a slide -->
+      <div class="slides">
+        <section>
+          <h1>activemodel serializers</h1>
+          <div>
+            <br>
+          </div>
+          <p>https://github.com/rails-api/active_model_serializers</p>
+        </section>
+        <section>
+          <h2>Contributors</h2>
+          <div>
+            <br>
+          </div>
+          <div>A merge of Rails and Ember.js core teams</div>
+          <div>
+            <br>
+          </div>
+          <div>wycats<br>
+          </div>
+          <div>josevalim</div>
+          <div>steveklabnik</div>
+          <div>spastorino</div>
+          <div>rafaelfranca</div>
+          <div>...</div>
+        </section>
+        <section>
+          <section>
+            <h2>What's the point ?</h2>
+            <div>Before ActiveModel::Serializers to generate JSON representations you had a few choices</div>
+          </section>
+          <section>
+            <h2>Good old #to_json</h2>
+            <div>
+              <pre><code class="ruby">
+  def as_json(options={})
+    options[:include] = Array.wrap(options[:include]) << :author
+    options[:methods] = Array.wrap(options[:methods]) << :tags
+    options[:methods] += self.class.column_names
+    options[:methods] -= %w(segment password)
+    super(options)
+  end
+               </code></pre>
+              </div>
+            <div>
+              <br>
+            </div>
+          </section>
+          <section>
+            <h2>Jbuilder</h2>
+            <div>
+                          <pre><code class="ruby">
+  Jbuilder.encode do |json|
+    json.content format_content(@message.content)
+    json.(@message, :created_at, :updated_at)
+
+    json.author do
+      json.name @message.creator.name.familiar
+      json.email_address @message.creator.email_address_with_name
+      json.url url_for(@message.creator, format: :json)
+    end
+
+    if current_user.admin?
+      json.visitors calculate_visitors(@message)
+    end
+
+    json.comments @message.comments, :content, :created_at
+
+    json.attachments @message.attachments do |attachment|
+      json.filename attachment.filename
+      json.url url_for(attachment)
+    end
+  end
+   </code></pre>
+            </div>
+            <div>
+              <br>
+            </div>
+          </section>
+          <section>
+            <h2>Rabl</h2>
+            <div>
+<pre><code class="ruby">
+  collection @posts
+  attributes :id, :title, :subject
+  child(:user) { attributes :full_name }
+  node(:read) { |post| post.read_by?(@user) }
+
+</code></pre>
+            </div>
+          </section>
+        </section>
+        <section>
+          <h2>Attributes</h2>
+
+<pre><code class="ruby">
+  class PostSerializer < ActiveModel::Serializer
+    attributes :id, :title, :body
+  end
+</code></pre>
+
+<pre><code class="ruby">
+  PostSerializer.new(post).to_json
+  
+</code></pre>
+
+<pre><code class="javascript">
+  {
+    "id": 1,
+    "title": "My Post",
+    "body": "Hello!"
+  }
+
+</code></pre>
+
+        </section>
+        <section>
+          <h2>Virtual attributes</h2>
+<pre><code class="ruby">
+  class PostSerializer < ActiveModel::Serializer
+    attributes :id, :title, :body, :url
+
+    def url
+      post_url(object)
+    end
+  end
+</code></pre>
+
+<pre><code class="javascript">
+  {
+    "id": 1,
+    "title": "My Post",
+    "body": "Hello!",
+    "url": "https://example.com/posts/1"
+  }
+
+</code></pre>
+
+        </section>
+        <section>
+          <h2>Conditionals</h2>
+
+<pre><code class="ruby">
+  class PostSerializer < ActiveModel::Serializer
+    attributes :id, :title, :body, :edit_url
+
+    def edit_url
+      edit_post_url(object)
+    end
+    
+    def include_edit_url?
+      scope.can_edit?(object)
+    end
+
+  end
+</code></pre>
+
+<pre><code class="javascript">
+  {
+    "id": 1,
+    "title": "My Post",
+    "body": "Hello!"
+  }
+
+</code></pre>
+
+<pre><code class="ruby">
+  class ApplicationController < ActionController::Base
+    serialization_scope :current_admin # default is :current_user
+  end
+
+</code></pre>
+
+        </section>
+        <section>
+          <h2>Relations</h2>
+          <pre><code class="ruby">
+  class PostSerializer < ActiveModel::Serializer
+    attributes :id, :title, :body
+    # The default serializer for the relation is automatically
+    # guessed but we can override it
+    has_many :comments, serializer: EmbededCommentSerializer
+  end
+          </code></pre>
+
+<pre><code class="javascript">
+  {
+    "id": 1,
+    "title": "My Post",
+    "body": "Hello!",
+    "comments": [
+      {"id": 1, "body": "What a great post!"},
+      {"id": 2, "body": "Don't feed the troll!"},
+    ]
+  }
+
+</code></pre>
+        </section>
+        <section>
+          <h2>Embeds</h2>
+
+          <pre><code class="ruby">
+  class PostSerializer < ActiveModel::Serializer
+    attributes :id, :title, :body
+    has_many :comments, embed: :ids
+  end
+          </code></pre>
+
+<pre><code class="javascript">
+  {
+    "post": {
+      "id": 1,
+      "title": "My Post",
+      "body": "Hello!",
+      "comment_ids": [1, 2]
+    },
+    "comments": [
+      {"id": 1, "body": "What a great post!"},
+      {"id": 2, "body": "Don't feed the troll!"},
+    ]
+  }
+
+</code></pre>
+
+        </section>
+        <section>
+          <section>
+            <h2>Integration - In Rails</h2>
+<pre><code class="ruby">
+  # In Gemfile
+  gem 'active_model_serializers'
+  
+  # In Controllers
+  
+  # Will automatically search for a PostSerializer
+  # in app/serializers/post_serializer.rb
+  render :json => @posts # as usual
+
+  # But you can specify it
+  render :json => @post, :serializer => FancyPostSerializer
+
+  # In Active Record Models: Nothing to do
+  # In other ActiveModel implementations (Mongoid, etc)
+  include ActiveModel::SerializerSupport
+</code></pre>
+          </section>
+          <section>
+            <h2>Integration - In other stufs</h2>
+            
+<pre><code class="ruby">
+  # Nothing fancy
+  SomeSerializer.new(some_model).to_json
+
+</code></pre>
+            
+          </section>
+        </section>
+
+        <section>
+          <h2>Developement Status</h2>
+
+          <ul>
+            <li>Active but a bit slowed down by Rails 4</li>
+            <li>The last release is pretty old.</li>
+            <li>You may want to use the github master</li>
+            <li>After Rails 4 the team aim to focus on HATEOS support</li>
+          </ul>
+
+        </section>
+
+        <section>
+          <h2>Questions ?</h2>
+        </section>
+
+      </div>
+
+    </div>
+
+    <script src="lib/js/head.min.js"></script>
+    <script src="js/reveal.min.js"></script>
+
+    <script>
+
+      // Full list of configuration options available here:
+      // https://github.com/hakimel/reveal.js#configuration
+      Reveal.initialize({
+        controls: true,
+        progress: true,
+        history: true,
+        center: true,
+
+        theme: Reveal.getQueryHash().theme, // available themes are in /css/theme
+        transition: Reveal.getQueryHash().transition || 'default', // default/cube/page/concave/zoom/linear/fade/none
+
+        // Optional libraries used to extend on reveal.js
+        dependencies: [
+          { src: 'lib/js/classList.js', condition: function() { return !document.body.classList; } },
+          { src: 'plugin/markdown/showdown.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+          { src: 'plugin/markdown/markdown.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+          { src: 'plugin/highlight/highlight.js', async: true, callback: function() { hljs.initHighlightingOnLoad(); } },
+          { src: 'plugin/zoom-js/zoom.js', async: true, condition: function() { return !!document.body.classList; } },
+          { src: 'plugin/notes/notes.js', async: true, condition: function() { return !!document.body.classList; } }
+          // { src: 'plugin/remotes/remotes.js', async: true, condition: function() { return !!document.body.classList; } }
+        ]
+      });
+
+    </script>
+
+  </body>
+</html>
