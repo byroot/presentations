@@ -1,0 +1,120 @@
+@font-face {
+  font-family: 'ProximaNovaBold';
+  src: url(style/fonts/proximanova-bold-proxima.eot);
+  src: url(style/fonts/proximanova-bold-proxima.eot?#iefix) format("embedded-opentype"),
+       url(style/fonts/proximanova-bold-proxima.woff) format("woff"),
+       url(style/fonts/proximanova-bold-proxima.ttf) format(truetype),
+       url(style/fonts/proximanova-bold-proxima.svg#ProximaNovaBold) format("svg");
+  font-weight: normal;
+  font-style: normal;
+}
+
+.content > pre{
+    font-size: 100% !important;
+}
+
+.content > pre > code{
+    line-height: 18px;
+}
+
+.presentation-cover{
+  margin-top: 0 !important;
+}
+
+.content.presentation-cover > p{
+    margin: 4px !important;
+}
+
+.content.presentation-cover img[alt="tigerlily-cover"] {
+    height: 600px;
+    width: 800px;
+}
+
+.proximaBold, strong .proximaBold, strong.proximaBold {
+  font-family: 'ProximaNovaBold', Arial, sans-serif;
+  font-weight: normal;
+  font-style: normal;
+}
+
+body{
+  font-size: 10px;
+  font-family: Arial, sans-serif;
+  overflow:auto;
+}
+
+h1{
+  position:absolute;
+  top:0;
+  left:0;
+  right:0;
+  color:#fff;
+  background:url(style/images/orange.gif);
+  padding:20px 0;
+  font-family: 'ProximaNovaBold', Arial, sans-serif;
+  margin:0;
+  -moz-box-shadow: 0px -1px 10px 0 rgba(0, 0, 0, 0.2) inset;
+  -webkit-box-shadow: 0px -1px 10px 0 rgba(0, 0, 0, 0.2) inset;
+  box-shadow: 0px -1px 10px 0 rgba(0, 0, 0, 0.2) inset;
+}
+
+a{
+  color: #F47320;
+}
+
+p, li{
+  font-size:30px !important;
+  line-height:32px !important;
+}
+
+p, .conten > p{
+  font-size:30px !important;
+  line-height:32px !important;
+  margin:2.5em !important;
+}
+
+.content ul{
+  list-style-image:url(style/images/bullet.png) !important;
+}
+.content ul ul{
+  list-style-image:none !important;
+  list-style-type:none !important;
+  padding-left:20px;
+}
+.content ul ul li{
+  margin:5px;
+  font-size:0.8em !important;
+}
+
+.slide:first-child h1{
+  position:relative;
+  font-size:6em;
+  padding:30px;
+}
+
+#footer{
+  background:#fff url(style/images/logo.png) right center no-repeat;
+  border-top:1px solid #aaa;
+  -webkit-border-radius: 0;
+  -moz-border-radius: 0;
+  border-radius: 0;
+  width: 984px;
+  height: 22px;
+  padding: 14px 0 10px 0;
+  top: -49px;
+}
+
+code{
+  font-size: 17px;
+  font-family:courier, monospace;
+}
+.sh_sourceCode{
+  padding: 20px 15px 30px 0;
+  background: #ddd;
+  -webkit-border-radius: 5px;
+  -moz-border-radius: 5px;
+  border-radius: 5px;
+  -moz-box-shadow: 0px 0px 3px rgba(0, 0, 0, 0.3);
+  -webkit-box-shadow: 0px 0px 3px rgba(0, 0, 0, 0.3);
+  box-shadow: 0px 0px 3px rgba(0, 0, 0, 0.3);
+  border:1px solid #bbb;
+}
