@@ -125,6 +125,48 @@ end</code></pre>
         </section>
 
         <section>
+          <h1>composed_of</h1>
+          <p>Since Rails 0.x (killed and then resurrected in 4.0)</p>
+          <div>
+            <pre><code class="ruby">class Shop < ActiveRecord::Base
+  composed_of :address, mapping: [%w(address_street street), %w(address_city city)]
+end
+
+class Address
+  def intialize(street, city)
+    @street, @city = street, city
+  end
+end</code></pre>
+          </div>
+
+          <div>
+            <pre><code class="ruby">&gt;&gt; shop.address_street
+=&gt; '126 York Street'
+&gt;&gt; shop.address
+=&gt; #&lt;Address:0x007fc584725c08 @street=&quot;126 York Street&quot;, @city=&quot;Ottawa&quot;&gt;
+</code></pre>
+          </div>
+          <p>Build a plain ruby object from a mapping of attributes</p>
+        </section>
+
+        <section>
+          <h1>composed_of - Good&nbsp;for</h1>
+          <ul>
+            <li>Still being able to query using pure SQL</li>
+            <li>Getting rid of an has_one association and thus a query or join</li>
+            <li>Moving logic into another object without schema change</li>
+          </ul>
+        </section>
+
+        <section>
+          <h1>composed_of - Drawbacks</h1>
+          <ul>
+            <li>Still require a schema change when adding fields</li>
+            <li>The object have to be immutable</li>
+          </ul>
+        </section>
+
+        <section>
           <h1>store</h1>
           <p>Since Rails 3.2</p>
           <div>
