@@ -37,6 +37,11 @@
       <div class="slides">
         <section>
           <h1>Demystifying Sprockets</h1>
+          <p>A.K.A. The Rails asset pipeline.</p>
+        </section>
+
+        <section>
+          <h2>Forewords</h2>
         </section>
 
         <section>
@@ -407,6 +412,16 @@ script_url('application') # => 'https://my.cdn.com/assets/application-d3b07384d1
           <li>You will need a bit of glue in your application to always go through sprockets to link assets.</li>
           <li>The index is a faster version of the environment that rely only on the manifest.json.</li>
           <li>If you use something else than ruby, you'll have to parse the manifest.json yourself.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h1>Common complaints</h1>
+
+        <ul>
+          <li>Dependency management: https://rails-assets.org or bower.</li>
+          <li>Slow compilation: make sure to share the <code>assets</code> directory between releases.</li>
+          <li>jQuery plugins with hardcoded paths: just use the <code>public/</code> directory or fix the few URLs.</li>
         </ul>
       </section>
 
