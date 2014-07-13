@@ -127,7 +127,7 @@ If-Modified-Since: Tue, 13 May 2014 02:26:31 GMT
         <section>
           <h2>HTTP Caching</h2>
 
-          <p>The Last-Modified header</p>
+          <p>The <code>Expires</code> / <code>Cache-Control</code> headers</p>
 
 <pre><code class="http">GET /ajax/libs/jquery/1.11.1/jquery.min.js HTTP/1.1
 Host: ajax.googleapis.com
@@ -156,12 +156,263 @@ Date: Thu, 10 Jul 2014 08:51:40 GMT
         <section>
           <h2>HTTP Caching</h2>
           <p>But how can I update my assets then?</p>
+          <img src="images/roy_browser_cache.jpg" />
         </section>
 
         <section>
-          <h2>Good Times</h2>
-          <img src="images/roy_browser_cache.jpg" />
+          <h2>Rails &lt;= 3.0</h2>
+          <p>Append the file <code>mtime</code> as query string</p>
+<pre><code class="html">&lt;script src="/javascripts/application.js?1405197924" ...
+</code></pre>
+          <br>
+          <h3>Drawbacks</h3>
+          <ul>
+            <li>Some proxies (squid) used to ignore the query string</li>
+            <li>Your deploy strategy need to preserve file properties</li>
+            <li>Possible race condition if you have multiple servers</li>
+            <li>Files are downloaded independently</li>
+          </ul>
         </section>
+
+        <section>
+          <h2>Sprockets</h2>
+          <p>Include the file MD5 in the file name</p>
+<pre><code class="html">&lt;script src="/assets/application-d3b07384d113edec49eaa6238ad5ff00.js"
+</code></pre>
+          <br>
+
+          <h3>Advantages</h3>
+          <ul>
+            <li>Proxies cannot serve stale assets</li>
+            <li>Hotlinking is not possible</li>
+            <li>No more race conditions, assets are guaranteed to match your HTML</li>
+            <li>Files are concatened together</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Sprockets - The Directive Processor</h2>
+<pre><code class="javascript">//= require jquery
+//= require_tree myapp
+//= require_self
+//= depend_on config
+//= stub prototype
+</code></pre>
+
+          <ul>
+            <li>Required file are included only once</li>
+            <li>All required files are part of the MD5 sum</li>
+            <li><code>depend_on</code> do not include the file, but use it to compute the MD5 sum</li>
+            <li><code>stub</code> can be useful to prevent one of your dependency from requiring something</li>
+            <li><code>include</code> (deprecated) like <code>require</code> without the unicity</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Sprockets - The Engine API</h2>
+<pre><code class="coffeescript"># config.js.coffee.erb
+@Config = 
+  truth: <%= 21 * 2 %>
+</code></pre>
+
+          <ul>
+            <li>Engines apply transformations on assets to convert them to another format based on extensions</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Sprockets - The Engine API</h2>
+<pre><code class="ruby">class Csv2Json &lt; Tilt::Template
+
+  def evaluate(scope, locals, &block)
+    JSON.dump(CSV.parse(data))
+  end
+
+end
+
+Sprockets.register_engine '.csv', Csv2Json
+</code></pre>
+
+<pre><code class="csv"># foo.json.csv
+Id,Name
+1,George Abitbol
+</code></pre>
+
+<pre><code class="javascript">// foo-6d04991772b0ab12f0a96971ad290d68.json
+[["Id","Name"],["1","George Abitbol"]]
+</code></pre>
+
+          <ul>
+            <li>Engines are just tilt templates</li>
+            <li>You can chain them as much as you want</li>
+            <li>See them as compilers</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Sprockets - Processors</h2>
+
+          <p>Processors are Tilt templates like engines, but they do not convert the asset to another type</p>
+
+<pre><code class="ruby">Sprockets.register_preprocessor 'text/javascript', RemoveBreakPoints
+Sprockets.register_postprocessor 'text/javascript', PrependSafetySemiColon
+Sprockets.register_bundle_processor 'text/javascript', MinifyJS
+</code></pre>
+
+          <p>Note that processors are registered by MIME type while engines are registered by extensions.</p>
+          <br>
+          <ul>
+            <li>Preprocessors are ran before Postprocessors and Engines</li>
+            <li>Postprocessors are ran after Preprocessors and Engines</li>
+            <li>Bundle Processors are ran on concatenated assets rather than individual files.</li>
+          </ul>
+        </section>
+
+        <section>
+          <h2>Sprockets</h2>
+          <p>Shorthand methods</p>
+
+<pre><code class="ruby">environment.js_compressor  = :uglify
+environment.css_compressor = :scss
+</code></pre>
+        </section>
+        <section>
+          <h2>Sprockets - Helpers</h2>
+
+          <p>The sprockets context provide helpers to engines, which can eventually expose them to the transormed assets</p>
+
+          <pre><code class="css">/* main.css.erb */
+.header { background-image: url(<%= image_path('header-background.png') %>);}
+</code></pre>
+          <p>They are mostly available in <code>.erb</code> assets.</p>
+
+          <pre><code class="scss">// main.css.scss
+.header { background-image: image-url(header-background.png); }
+</code></pre>
+
+        <p>But some engines like SCSS provide integrated support</p>
+
+
+        </section>
+
+        <section>
+          <h2>Sprockets - Helpers</h2>
+          <p>Most usefull ones are:</p>
+
+          <ul>
+            <li><code>image_path</code>, <code>font_path</code>, etc. Gives you the digested path of another asset.</li>
+            <li><code>asset_data_uri</code> gives you the Base64 encoded asset content (for embeding images).</li>
+          </ul>
+          <br><br>
+          <p>And you can off course add custom ones</p>
+
+        </section>
+
+
+        <section>
+          <h2>Sprockets - Integration</h2>
+
+          <p>Even if he is often nicknamed "The Rails asset pipeline", Sprockets is actually framework agnostic</p>
+
+          <p>It can even easilly be used in non Ruby projects (PHP, Node, Python, etc)</p>
+        </section>
+
+
+        <section>
+          <h2>Sprockets - Integration</h2>
+
+          <pre><code class="ruby"># lib/sprockets_environment.rb
+require 'sprockets'
+
+module MyEnvironment &lt; Sprockets::Environment
+  def initialize(production=true)
+    root = File.expand_path(File.join(__dir__, '..'))
+    super(root + '/public')
+
+    append_path(root + '/app/assets/javascripts')
+    append_path(root + '/app/assets/stylesheets')
+    append_path(root + '/app/assets/images')
+
+    if production
+      self.css_compressor = :scss
+      self.css_compressor = :uglifier
+    end
+  end
+end
+</code></pre>
+        <p>All the configuration would happen in a subclass of <code>Sprockets::Environment</code></p>
+        </section>
+
+        <section>
+          <h2>Sprockets - Integration</h2>
+
+          <pre><code class="ruby"># config.ru
+require 'sprockets_environment'
+
+map '/assets' do
+  run MyEnvironment.new
+end
+</code></pre>
+
+        <ul>
+          <li><code>Sprockets::Environment</code> acts as a rack middleware.</li>
+          <li>It will compile and bundle your assets on the fly when requested.</li>
+          <li>No need to wonder if the compilation is done or not yet, your browser will wait until sprockets is done.</li>
+          <li>This is intended for development.</li>
+        </ul>
+      </section>
+
+        <section>
+          <h2>Sprockets - Integration</h2>
+
+          <pre><code class="ruby"># Rakefile
+require 'rake/sprocketstask'
+require 'sprockets_environment'
+
+Rake::SprocketsTask.new do |t|
+  t.environment = run MyEnvironment.new
+  t.output      = "./public/assets"
+  t.assets      = %w( application.js application.css )
+end
+</code></pre>
+
+        <ul>
+          <li><code>rake assets:precompile</code> will statically compile every listed bundles.</li>
+          <li>If the output directory is shared between releases, it will only compile what changed.<li>
+          <li>A <code>manifest.json</code> file will be generated, containing all the mapping between the source files and the compiled files.</li>
+        </ul>
+      </section>
+
+        <section>
+          <h2>Sprockets - Integration</h2>
+
+          <pre><code class="ruby"># in your app helpers
+ASSETS_ROOT = 'https://my.cdn.com/assets/'
+
+def sprockets
+  @sprockets ||= begin
+    env = MyEnvironment.new
+    ENV['RACK_ENV'] == 'production' ? env.index : env
+  end
+end
+
+def script_url(name)
+  ASSETS_ROOT + sprockets.find_asset(name + '.js').digested_path
+end
+
+script_url('application') # => 'https://my.cdn.com/assets/application-d3b07384d113edec49eaa6238ad5ff00.js'
+</code></pre>
+
+        <ul>
+          <li>You will need a bit of glue in your application to always go through sprockets to link assets.</li>
+          <li>The index is a faster version of the environment that rely only on the manifest.json.</li>
+          <li>If you use something else than ruby, you'll have to parse the manifest.json yourself.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h1>Conclusion</h1>
+      </section>
 
 
         <section>
