@@ -109,17 +109,6 @@ If-Modified-Since: Tue, 13 May 2014 02:26:31 GMT
         <section>
           <h2>HTTP Caching</h2>
 
-          <p>The ETag header</p>
-          
-          <p>Same behaviour, but hash based.</p>
-
-          <p>Headers are <code>ETag</code> and <code>If-None-Match</code></p>
-
-        </section>
-
-        <section>
-          <h2>HTTP Caching</h2>
-
           <img src="images/not_modified.png" />
 
           <img src="images/not_bad.jpg" />
@@ -141,7 +130,6 @@ Accept: text/javascript
 
 <pre><code class="http">HTTP/1.1 200 OK
 Content-Type: text/javascript; charset=UTF-8
-Expires: Tue, 13 May 2015 02:26:31 GMT
 Cache-Control: max-age=31536000, public
 Date: Thu, 10 Jul 2014 08:51:40 GMT
 
@@ -151,7 +139,11 @@ Date: Thu, 10 Jul 2014 08:51:40 GMT
         <p>No other request will be issued for a year</p>
 
         </section>
-        
+
+        <section>
+          <h1>Any Question at this point?</h1>
+        </section>
+
         <section>
           <h2>HTTP Caching</h2>
           <img src="images/from_cache.png" />
@@ -309,7 +301,7 @@ environment.css_compressor = :scss
             <li><code>asset_data_uri</code> gives you the Base64 encoded asset content (for embeding images).</li>
           </ul>
           <br><br>
-          <p>And you can off course add custom ones</p>
+          <p>And you can of course add custom ones</p>
 
         </section>
 
@@ -383,7 +375,7 @@ end
 
         <ul>
           <li><code>rake assets:precompile</code> will statically compile every listed bundles.</li>
-          <li>If the output directory is shared between releases, it will only compile what changed.<li>
+          <li>If the output directory is shared between releases, it will only compile what changed.</li>
           <li>A <code>manifest.json</code> file will be generated, containing all the mapping between the source files and the compiled files.</li>
         </ul>
       </section>
@@ -433,7 +425,7 @@ script_url('application') # => 'https://my.cdn.com/assets/application-d3b07384d1
 
 
         <section>
-          <h1>Any Question ?</h1>
+          <h1>Any Question?</h1>
           <p>Jean Boussier</p>
           <p>Shopify</p>
           <p>https://github.com/byroot</p>
