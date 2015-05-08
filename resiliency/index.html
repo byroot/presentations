@@ -8,13 +8,31 @@
       @import url(https://fonts.googleapis.com/css?family=Droid+Serif:400,700,400italic);
       @import url(https://fonts.googleapis.com/css?family=Ubuntu+Mono:400,700,400italic);
 
-      body { font-family: 'Droid Serif'; }
+      body { font-family: "Brandon", Helvetica, Arial, sans-serif; }
       h1, h2, h3 {
         font-family: 'Yanone Kaffeesatz';
         font-weight: normal;
       }
       .remark-code, .remark-inline-code { font-family: 'Ubuntu Mono'; }
 
+      .remark-slide-content {
+        background: #f7f2d3;
+        background: -moz-radial-gradient(center, circle cover, white 0%, #f7f2d3 100%);
+        background: -webkit-gradient(radial, center center, 0px, center center, 100%, color-stop(0%, white), color-stop(100%, #f7f2d3));
+        background: -webkit-radial-gradient(center, circle cover, white 0%, #f7f2d3 100%);
+        background: -o-radial-gradient(center, circle cover, white 0%, #f7f2d3 100%);
+        background: -ms-radial-gradient(center, circle cover, white 0%, #f7f2d3 100%);
+        background: radial-gradient(center, circle cover, white 0%, #f7f2d3 100%);
+        background-color: #f7f3de;
+
+      }
+
+      a {
+        color: #4183c4;
+        text-decoration: none;
+       }
+
+      a:visisted { color: #4183c4; }
       img[src$='#inline-icon'] {
         height: 24px;
         width: 24px;
@@ -32,6 +50,7 @@
         height: 400px;
       }
     </style>
+     <link href="bekk-0.0.3.css" rel="stylesheet" />
   </head>
   <body>
     <textarea id="source">
@@ -52,12 +71,12 @@ Our customers trust was disminished, and with the holiday season approaching, av
 
 A 6 people team was formed to improve the situation.
 
-  - Graeme Johnson - [@graemej](https://github.com/graemej)
-  - Florian Weingarten - [@fw42](https://github.com/fw42)
-  - Simon Eskildsen - [@sirupsen](https://github.com/sirupsen)
-  - Scott Francis - [@csfrancis](https://github.com/csfrancis)
-  - Evan Huus - [@eapache](https://github.com/eapache)
-  - Jean Boussier - [@byroot](https://github.com/byroot)
+  - [@graemej](https://github.com/graemej) - Graeme Johnson
+  - [@fw42](https://github.com/fw42) - Florian Weingarten
+  - [@sirupsen](https://github.com/sirupsen) - Simon Eskildsen
+  - [@csfrancis](https://github.com/csfrancis) - Scott Francis
+  - [@eapache](https://github.com/eapache) - Evan Huus
+  - [@byroot](https://github.com/byroot) - Jean Boussier
 
 ---
 
@@ -419,7 +438,9 @@ class: center, middle
     <script src="./remark.js">
     </script>
     <script>
-      var slideshow = remark.create();
+      var slideshow = remark.create({
+        'highlightStyle': 'solarized_dark'
+      });
     </script>
   </body>
 </html>
