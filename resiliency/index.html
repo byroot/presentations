@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Building and Testing Resilient Applications</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+    <style type="text/css">
+      @import url(https://fonts.googleapis.com/css?family=Yanone+Kaffeesatz);
+      @import url(https://fonts.googleapis.com/css?family=Droid+Serif:400,700,400italic);
+      @import url(https://fonts.googleapis.com/css?family=Ubuntu+Mono:400,700,400italic);
+
+      body { font-family: 'Droid Serif'; }
+      h1, h2, h3 {
+        font-family: 'Yanone Kaffeesatz';
+        font-weight: normal;
+      }
+      .remark-code, .remark-inline-code { font-family: 'Ubuntu Mono'; }
+
+      img[src$='#inline-icon'] {
+        height: 24px;
+        width: 24px;
+        display: inline-block;
+        margin: 4px;
+        top: 8px;
+        position: relative;
+      }
+      
+      img[src$='#fit-width'] {
+        width: 800px;
+      }
+      
+      img[src$='#fit-height'] {
+        height: 400px;
+      }
+    </style>
+  </head>
+  <body>
+    <textarea id="source">
+
+class: center, middle
+
+# Building and Testing
+
+# Resilient Applications
+
+---
+
+# Background - The Resiliency Team
+
+During summer 2014, Shopify experienced a succession of outages which ultimately lead to an all time low availability.
+
+Our customers trust was disminished, and with the holiday season approaching, availabilty became the #1 priority.
+
+A 6 people team was formed to improve the situation.
+
+  - Graeme Johnson - [@graemej](https://github.com/graemej)
+  - Florian Weingarten - [@fw42](https://github.com/fw42)
+  - Simon Eskildsen - [@sirupsen](https://github.com/sirupsen)
+  - Scott Francis - [@csfrancis](https://github.com/csfrancis)
+  - Evan Huus - [@eapache](https://github.com/eapache)
+  - Jean Boussier - [@byroot](https://github.com/byroot)
+
+---
+
+# Shits happen
+
+### A selection of witnessed production incidents
+
+  - Wrong server unplugged for maintenance
+  - Weird network packets drop
+  - MySQL segfaults every nights at 3 am
+
+
+  - Memcache 100Mbit/s link
+  - Redis KEYS / FLUSHDB
+  - ElasticSearch stop the world GC
+  - MySQL query planner shenanigans (slow queries)
+
+---
+
+# Understanding Availability
+
+- It's usally expressed in percentage: `99.99%` -> `4m20s` of downtime per month.
+
+- Your app availability is at best the combinaison of the availability of all your hard dependencies.
+
+- If you have N dependencies with `99.99%` availability, you can't expect more than `99.99%^N` availability.
+
+- Example `10` dependencies at `99.99%` availability: you are at best `99.9%` -> `43m48s` of downtime per month.
+
+
+---
+
+# Even the most monolithic applications have external dependencies
+
+Typical stack for non-trivial web apps in 2015:
+
+- RDBMS (MySQL / Postgres)
+- Redis
+- Memcached
+- ElasticSearch
+- Load balancer
+- S3
+- CDN
+- Some mailing service
+- Some customer tracking service
+- Your network provider you probably never heard of
+- ...
+
+You probably reached 10 dependencies without realising it.
+
+---
+
+# Classic approach to better availability
+
+### The obvious answer is to increase the dependencies availability
+
+> `A = a^N` then let's make `a` better.
+
+### Problems
+
+- It becomes increasingly more difficult and expensive (maintenance, firedrills, expertise).
+- Even the most fault tolerant systems can be brought down by human error or nasty bugs.
+
+You should definitely do it to some extent, but it has it's limits.
+
+---
+
+# The resiliency approach
+
+### Definition
+
+> Resiliency is the ability to provide and maintain an acceptable level
+of service in the face of faults and challenges to normal operation.
+
+Level of service is most commonly refered as availability.
+
+---
+
+![](shop_dependencies.png#fit-width)
+
+---
+
+Do you prefer that?
+
+![](500.png#fit-width)
+
+---
+
+Or that?
+
+![](lost_cart.png#fit-width)
+
+---
+
+# Service degradation
+
+> Your application should not stop working because a service required only by a minor feature is down.
+>
+> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&mdash;<cite>Captain Obvious, 2015</cite>
+
+---
+
+# Fail gracefully or fail fast
+
+Cascading failures have mostly 2 root causes
+
+### Functionnal dependencies (fail gracefully)
+
+Feature `F` needs service `S`. `S` is down, all the sections displaying `F` are unavailable.
+
+### Capacity depletion (fail fast)
+
+One of dependency is so slow that all the threads are stuck waiting for it. The entire app is unavailable.
+
+---
+
+# Failing gracefully
+
+### The dependency matrix
+
+![](matrix.png)
+
+Ideally you should draw it using your integration tests to ensure it's accurate.
+
+---
+
+# Failing gracefully
+
+### Simulating network errors
+
+```ruby
+def test_section_a_resilient_to_data_store_b_being_down
+  Toxiproxy[:data_store_b].down do
+    get '/section_a'
+    assert_response :success
+  end
+end
+```
+
+Toxiproxy allows you to temper programatically with any TCP connection your application use to simulate all sorts of outages.
+
+Ideally you want one test per logical section and network dependency combinaison that is supposed to be without consequences.
+
+![](github.png#inline-icon)[https://github.com/shopify/toxiproxy](https://github.com/shopify/toxiproxy)
+
+---
+
+# Failing gracefully
+
+### Handling network errors
+
+The classic mistake
+
+```ruby
+class Product
+  def tags
+    redis.smembers("product:#{id}:tags")
+  end
+end
+```
+
+Slightly better
+
+```ruby
+class Product
+  def tags
+    redis.smembers("product:#{id}:tags")
+  rescue Redis::BaseConnectionError
+    []
+  end
+end
+```
+
+---
+
+# Failing gracefully
+
+### Abstractions are your friends
+
+```ruby
+class PersistentSet
+  def to_a
+    redis.smembers(key)
+  rescue Redis::BaseConnectionError
+    []
+  end
+
+  def include?(value)
+    redis.sismember(key, value)
+  rescue Redis::BaseConnectionError
+    false
+  end
+end
+```
+
+  - If you handle errors too low, you can't decide on a proper fallback.
+  - If you handle them too high, it leads to maintenance hell.
+
+---
+
+# Failing fast
+
+### Understanding capacity
+
+> The long-term average number of customers in a stable system L is equal to the long-term average
+> effective arrival rate, λ, multiplied by the (Palm‑)average time a customer spends in the
+> system, W; or expressed algebraically: L = λW.
+>
+> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&mdash;<cite>[Little's law](https://en.wikipedia.org/wiki/Little%27s_law), 1954</cite>
+
+
+λ is commonly refered as thoughtput and expressed in requests per minute.
+`W` is the average response time and `L` is the capacity.
+
+---
+
+# Failing fast
+
+### Case study
+
+![](capacity.png#fit-width)
+
+An application with an average response time of `60ms` can process `1kRPM` per thread.
+
+So it needs 100 threads to handle `100kRPM` of throughtput.
+
+---
+
+# Failing fast
+
+### Case study
+
+![](capacity_outage.png#fit-width)
+
+If `1%` of the traffic suddenly timeout on a resource after 30 seconds, the response time will raise to `360ms`.
+
+The application now needs 600 threads to handle the same `100kRPM` of throughtput.
+
+If the threads capacity is depleted, the requests will be queued or rejected and the throughtput will decrease.
+
+---
+
+# Failing fast
+
+### Keep your timeouts low
+
+That's how a minor side feature, that represent only 1% of the traffic, can bring the entire application down.
+
+Unless all the timeouts of all the resources are extremely low, it's unrealistic to keep enough capacity to handle the worst case.
+
+Most of the time a few outlier queries prevent the timeout from being reduced.
+
+---
+
+# Failing fast
+
+### Semian
+
+Semian is a library for controlling access to slow or unresponsive external services to avoid cascading failures.
+
+![](github.png#inline-icon)[https://github.com/shopify/semian](https://github.com/shopify/semian)
+
+---
+
+# Failing fast
+
+### Postulate
+
+> If a query to a service failed, retrying it immediatelly will likely fail again.
+
+Therefore querying a service that failed recently is a waste of capacity.
+
+---
+
+# Failing fast
+
+### Semian - Circuit Breakers
+
+<img src="circuit_breaker.png#fit-height" style="float: left; margin-right: 20px;" />
+
+- The circuit breaker record all the network errors and timeouts happening on a resource.
+
+- After too many errors happened in a short period of time, the circuit will open and immediately reject any further queries.
+
+- After some time in the open state, the circuit will let a request go throught.
+
+- If it still generate errors, the circuit closes again immediately.
+
+- After several successful requests the circuit will go back to it's original closed state.
+
+---
+
+# Failing fast
+
+### Semian - Circuit Breakers
+
+Although the circuit breakers will prevent further loss of capacity, in case of very long timeouts the
+capacity might be totally depleted before they open.
+
+Worse, if the service is extremely slow, but not enough to trigger any timeout, they might not open at all.
+
+---
+
+# Failing fast
+
+### Postulates
+
+> If a service can't keep up with the load it receives, querying it again will only makes things worse.
+
+Therefore querying an already overloaded service is undesirable.
+
+> The application spend 10% of it's time querying a specific service.
+
+Therefore on a server with 10 threads the probability that 5 threads are using that service at any given time is only `0.001%`.
+
+---
+
+# Failing fast
+
+### Semian - Semaphores
+
+<img src="semaphore.png#fit-height" style="float: left; margin-right: 20px;" />
+
+- Before actually querying the service, a ticket must be acquired.
+- If they are all in use, an exception is raised immediately.
+- A lack of ticket is considered as an error by the circuit breaker.
+
+
+---
+
+# Should I really do all this?
+
+Semian is not a trivial library, and comming with the right settings requires a lot of monitoring, experimentation and care.
+
+If Semian is improperly configured it will create more issues than it will solve.
+
+However there some good practices that are easy to follow early on.
+
+---
+
+# Takeways
+
+### A few advices on how never have to waste time on resiliency
+
+- Always keep your timeouts low, especially the web server one.
+  - 5 seconds should be enough for every web request
+- Think twice before adding a new dependency
+- Put boundaries to everthing.
+  - e.g. cap tags to 50 per product, worst case you can charge to raise that limit.
+
+
+---
+
+class: center, middle
+
+# Thank you
+
+    </textarea>
+    <script src="./remark.js">
+    </script>
+    <script>
+      var slideshow = remark.create();
+    </script>
+  </body>
+</html>
