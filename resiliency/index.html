@@ -244,7 +244,8 @@ Slightly better
 class Product
   def tags
     redis.smembers("product:#{id}:tags")
-  rescue Redis::BaseConnectionError
+  rescue Redis::BaseConnectionError => error
+    ErrorReporter.log(error)
     []
   end
 end
