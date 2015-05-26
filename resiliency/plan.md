@@ -43,7 +43,7 @@
 
 - Fail gracefully or fail fast
   - Cascading failures have mostly 2 pattern
-    - Functionnal dependencies
+    - Functional dependencies
     - Capacity depletion
 
 - Fail gracefully

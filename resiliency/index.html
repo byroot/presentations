@@ -153,6 +153,7 @@ of service in the face of faults and challenges to normal operation.
 
 Level of service is most commonly refered as availability.
 
+The goal being to prevent one misbehaving dependency compromising the performance or availability of the entire system.
 ---
 
 ![](shop_dependencies.png#fit-width)
@@ -183,7 +184,7 @@ Or that?
 
 Cascading failures have mostly 2 root causes
 
-### Functionnal dependencies (fail gracefully)
+### Functional dependencies (fail gracefully)
 
 Feature `F` needs service `S`. `S` is down, all the sections displaying `F` are unavailable.
 
@@ -218,7 +219,7 @@ end
 
 Toxiproxy allows you to temper programatically with any TCP connection your application use to simulate all sorts of outages.
 
-Ideally you want one test per logical section and network dependency combinaison that is supposed to be without consequences.
+Ideally you want one test per logical section and network dependency combination that is supposed to be without consequences.
 
 ![](github.png#inline-icon)[https://github.com/shopify/toxiproxy](https://github.com/shopify/toxiproxy)
 
@@ -275,12 +276,15 @@ end
 
   - If you handle errors too low, you can't decide on a proper fallback.
   - If you handle them too high, it leads to maintenance hell.
+  - The Null Object pattern is usually very handy.
 
 ---
 
 # Failing fast
 
 ### Understanding capacity
+
+![](louvre_line.png#fit-width)
 
 > The long-term average number of customers in a stable system L is equal to the long-term average
 > effective arrival rate, λ, multiplied by the (Palm‑)average time a customer spends in the
@@ -425,6 +429,7 @@ However there some good practices that are easy to follow early on.
 - Always keep your timeouts low, especially the web server one.
   - 5 seconds should be enough for every web request
 - Think twice before adding a new dependency
+  - And be clear which ones are hard and which ones are soft.
 - Put boundaries to everthing.
   - e.g. cap tags to 50 per product, worst case you can charge to raise that limit.
 
