@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Pitchfork</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+    <style type="text/css">
+      @import url(https://fonts.googleapis.com/css?family=Yanone+Kaffeesatz);
+      @import url(https://fonts.googleapis.com/css?family=Droid+Serif:400,700,400italic);
+      @import url(https://fonts.googleapis.com/css?family=Ubuntu+Mono:400,700,400italic);
+
+      body { font-family: "Brandon", Helvetica, Arial, sans-serif; }
+      h1, h2, h3 {
+        font-family: 'Yanone Kaffeesatz';
+        font-weight: normal;
+      }
+      .remark-code, .remark-inline-code { font-family: 'Ubuntu Mono'; }
+
+      .remark-slide-content {
+        background: #f7f2d3;
+        background: -moz-radial-gradient(center, circle cover, white 0%, #f7f2d3 100%);
+        background: -webkit-gradient(radial, center center, 0px, center center, 100%, color-stop(0%, white), color-stop(100%, #f7f2d3));
+        background: -webkit-radial-gradient(center, circle cover, white 0%, #f7f2d3 100%);
+        background: -o-radial-gradient(center, circle cover, white 0%, #f7f2d3 100%);
+        background: -ms-radial-gradient(center, circle cover, white 0%, #f7f2d3 100%);
+        background: radial-gradient(center, circle cover, white 0%, #f7f2d3 100%);
+        background-color: #f7f3de;
+
+      }
+
+      a {
+        color: #4183c4;
+        text-decoration: none;
+       }
+
+      a:visisted { color: #4183c4; }
+      img[src$='#inline-icon'] {
+        height: 24px;
+        width: 24px;
+        display: inline-block;
+        margin: 4px;
+        top: 8px;
+        position: relative;
+      }
+      
+      img[src$='#fit-width'] {
+        width: 800px;
+      }
+      
+      img[src$='#fit-height'] {
+        height: 400px;
+      }
+
+      img[src$='#half-height'] {
+        height: 200px;
+      }
+    </style>
+     <link href="bekk-0.0.3.css" rel="stylesheet" />
+  </head>
+  <body>
+    <textarea id="source">
+
+class: center, middle
+
+# Pitchfork
+
+### Minimizing memory usage by maximizing Copy-on-Write performance.
+
+---
+
+# Existing Ruby HTTP Servers
+
+## Unicorn
+
+A traditional preforking server
+
+## Puma
+
+Combines preforking and threading to reduce memory usage.
+
+---
+
+# Unicorn
+
+## Pros
+
+- Each worker has its own GVL, so entirely avoid Global VM Lock (GVL) contention.
+- Similarly each worker has its own heap, so GC pressure is purely local.
+- Requests are handled in a dedicated process, which is better for resiliency, isolation, etc.
+- If a request mis-behave, the worker can be killed and reforked.
+
+## Cons
+
+- Relies on Copy-on-Write (CoW) to keep memory usage reasonable, but MRI doesn't play well with CoW.
+
+---
+
+# Puma
+
+## Pros
+
+- Threads allow shared-mutable state, reducing memory usage for a given throughtput.
+
+## Cons
+
+- Threads have to compete for the Global VM Lock (GVL), increasing latency.
+- The heap is shared, so GC pause impact all collocated requests.
+- A misbehaving request might impact other requests in the same process.
+- Can't immediately kill a worker, you first need to evacuate it.
+
+---
+
+# Global VM Lock Impact on Latency
+
+Processes
+
+![](process-timeline.webp#half-height)
+
+Threads
+
+![](thread-timeline.webp#half-height)
+
+
+---
+
+# Memory Usage
+
+Naive view of memory usage, threads vs processes
+
+![](memory-naive.webp#fit-height)
+
+---
+
+# Memory Usage: Copy on Write (CoW)
+
+CoW allow multiple processes to transparently share memory regions
+
+![](memory-cow.webp#fit-height)
+
+
+---
+
+# CoW invalidation
+
+Whenever a process writes into a shared memory page, it is transparently copied, increasing memory usage.
+
+Generally caused by:
+
+- Lazy initialization of global state.
+- YARV Inline caches.
+- YJIT.
+
+In practice CoW effiency rarely goes beyond 60%, generally much less at 40 to 50%.
+
+However, the vast majority of these memory regions tend to stabilize after a while.
+
+---
+
+# Reforking - Initial boot
+
+- The master process spawn a "mold".
+- The mold then spawn the required amount of workers.
+- Workers are re-attached to the master process using `PR_SET_CHILD_SUBREAPER`
+
+```
+PID   COMMAND
+100   \_ pitchfork master
+101       \_ pitchfork mold (gen:0)
+102       \_ pitchfork worker[0] (gen:0)
+103       \_ pitchfork worker[1] (gen:0)
+104       \_ pitchfork worker[2] (gen:0)
+105       \_ pitchfork worker[3] (gen:0)
+```
+
+---
+
+# Reforking - Worker promotion
+
+- When some conditions are reached, the master send a promotion signal to one of the workers.
+- That worker stop processing requests, and becomes a mold.
+- The previous mold exits.
+
+```
+PID   COMMAND
+100   \_ pitchfork master
+102       \_ pitchfork mold (gen:1)
+103       \_ pitchfork worker[1] (gen:0)
+104       \_ pitchfork worker[2] (gen:0)
+105       \_ pitchfork worker[3] (gen:0)
+```
+
+---
+
+# Reforking - Worker rollout
+
+- After a new mold has been promoted, old generation workers are rolled out
+- New workers are forked from the new mold.
+
+```
+PID   COMMAND
+100   \_ pitchfork master
+102       \_ pitchfork mold (gen:1)
+106       \_ pitchfork worker[0] (gen:1)
+107       \_ pitchfork worker[1] (gen:1)
+108       \_ pitchfork worker[2] (gen:1)
+109       \_ pitchfork worker[3] (gen:1)
+```
+
+---
+
+# Benchmark - Application
+
+- 100k methods.
+- Each method lookup a single constant.
+- This demonstrates the impact of inline caches on CoW invalidations.
+
+```ruby
+module App
+  module Const0; end
+  def self.lookup_0
+    Const0
+  end
+  # etc...
+
+  def self.warmup
+    lookup_0
+    lookup_1
+    # etc...
+  end
+end
+
+run lambda { |env|
+  App.warmup
+  [ 200, { 'content-type' => 'text/plain' }, [ "OK" ] ]
+}
+```
+
+---
+
+# Benchmark - Puma
+
+- Using 2 worker processes.
+- Each worker has two threads.
+- Total memory usage is ~600MiB.
+
+```bash
+$ PORT=9292 bundle exec benchmark/cow_benchmark.rb puma -w 2 -t 2 --preload
+Booting server...
+Warming the app with ab...
+Memory Usage:
+Single Worker Memory Usage: 207.5 MiB
+Total Cluster Memory Usage: 601.6 MiB
+```
+
+---
+
+# Benchmark - Pitchfork
+
+- Using 4 worker processes.
+- Total memory usage is ~320MiB.
+
+```bash
+$ PORT=8080 bundle exec benchmark/cow_benchmark.rb pitchfork -c examples/pitchfork.conf.minimal.rb 
+Booting server...
+Warming the app with ab...
+Memory Usage:
+Single Worker Memory Usage: 62.6 MiB
+Total Cluster Memory Usage: 320.3 MiB
+```
+
+---
+
+# Conclusion
+
+- Pitchfork retain all the advantages of process based servers like Unicorn.
+- Memory usage is drastically reduced via improved CoW efficiency.
+- No GVL contention.
+- No shared mutable state.
+- Allow to share YJIT generated code.
+
+---
+
+# Thank you
+
+- [An In-Depth Look at Ruby’s Execution Models](https://shopify.engineering/ruby-execution-models)
+- [Pitchfork Benchmark](https://github.com/Shopify/pitchfork/tree/master/benchmark)
+- [Pitchfork repository](https://github.com/Shopify/pitchfork)
+
+    </textarea>
+    <script src="./remark.js">
+    </script>
+    <script>
+      var slideshow = remark.create({
+        'highlightStyle': 'solarized_dark'
+      });
+    </script>
+  </body>
+</html>
