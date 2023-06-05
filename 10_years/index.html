@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>A Decade of Rails Contributions</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+    <style type="text/css">
+      @import url(https://fonts.googleapis.com/css?family=Yanone+Kaffeesatz);
+      @import url(https://fonts.googleapis.com/css?family=Droid+Serif:400,700,400italic);
+      @import url(https://fonts.googleapis.com/css?family=Ubuntu+Mono:400,700,400italic);
+
+      body { font-family: "Brandon", Helvetica, Arial, sans-serif; }
+      h1, h2, h3 {
+        font-family: 'Yanone Kaffeesatz';
+        font-weight: normal;
+      }
+      .remark-code, .remark-inline-code { font-family: 'Ubuntu Mono'; }
+
+      .remark-slide-content {
+        background: #f7f2d3;
+        background: -moz-radial-gradient(center, circle cover, white 0%, #f7f2d3 100%);
+        background: -webkit-gradient(radial, center center, 0px, center center, 100%, color-stop(0%, white), color-stop(100%, #f7f2d3));
+        background: -webkit-radial-gradient(center, circle cover, white 0%, #f7f2d3 100%);
+        background: -o-radial-gradient(center, circle cover, white 0%, #f7f2d3 100%);
+        background: -ms-radial-gradient(center, circle cover, white 0%, #f7f2d3 100%);
+        background: radial-gradient(center, circle cover, white 0%, #f7f2d3 100%);
+        background-color: #f7f3de;
+
+      }
+
+      a {
+        color: #4183c4;
+        text-decoration: none;
+       }
+
+      a:visisted { color: #4183c4; }
+      img[src$='#inline-icon'] {
+        height: 24px;
+        width: 24px;
+        display: inline-block;
+        margin: 4px;
+        top: 8px;
+        position: relative;
+      }
+      
+      img[src$='#fit-width'] {
+        width: 800px;
+      }
+      
+      img[src$='#fit-height'] {
+        height: 400px;
+      }
+
+      img[src$='#half-height'] {
+        height: 200px;
+      }
+
+    </style>
+     <link href="bekk-0.0.3.css" rel="stylesheet" />
+  </head>
+  <body>
+    <textarea id="source">
+
+class: center, middle
+
+# A Decade of Rails Contributions
+
+### Jean Boussier
+
+---
+
+### TODO: presentation, whoami
+
+---
+
+# The Opportunity
+
+- In late October 2013, I joined the newly created Shopify office in Montréal
+- The team was growing so fast that I often didn't really have work assigned
+- So I started looking at the oldest issues on GitHub and tried fixing them, making a bit of a bug squasher reputation for myself
+- Until one day, I my lead mentions a slow database query issue
+- Little did I know, this would lead to my first sizeable Rails contribution
+
+---
+
+![](images/slow_count_query.png#fit-width)
+
+`126ms` is a lot of time, even for a background job
+
+---
+
+Active Record provide counter caches to avoid slow `COUNT` queries
+
+![](images/active_record_count.png#fit-width)
+
+But for some reason, a change was made to explicitly not use the counter cache
+
+---
+
+Almost a year prior, it was reported that counter caches were obviously wrong 🤨
+
+![](images/negative_counter_caches.png#fit-width)
+
+Some fixes were attempted, like moving counter caches to Redis, but it didn't solve the problem.
+
+---
+
+How counter caches (are supposed to) work
+
+```ruby
+create_table :collections do |t|
+  t.integer :products_count, default: 0
+end
+```
+
+```ruby
+class Collection < ApplicationRecord
+  has_and_belongs_to_many :products
+end
+```
+
+```ruby
+collection.products_count # => 0
+collection.products.create!(...)
+collection.products_count # => 1
+
+collection.products.first.destroy
+collection.products_count # => 0
+```
+
+---
+
+Going one layer deeper
+
+```sql
+BEGIN
+
+UPDATE collection SET products_count = products_count + 1 WHERE id = 1;
+
+INSERT INTO products VALUES (2, ...);
+
+COMMIT
+```
+
+```sql
+BEGIN
+
+UPDATE collection SET products_count = products_count - 1 WHERE id = 1;
+
+DELETE FROM products WHERE id = 2;
+
+COMMIT
+```
+
+The increment or decrement is done atomically on the database side, inside the same transaction that insert or delete the record
+
+---
+
+
+“ Overconfidence is a slow and insidious killer ”
+
+
+![](images/counter_cache_initial_assessment.png#fit-width)
+
+
+Several colleagues tried to fix this issue without success, assuming it was a concurrency issue, so obviously it must have been something else.
+
+Additionally, counter caches had been in Rails pretty much since its inception, surely someone else would have noticed that a long time ago.
+
+So I started looking at their implementation to try to guess what we may be doing wrong.
+
+---
+
+Counter Caches in Rails 3.2:
+
+```ruby
+module ActiveRecord::Associations::Builder
+  class BelongsTo < SingularAssociation #:nodoc:
+    private
+
+      def add_counter_cache_callbacks(reflection)
+        cache_column = reflection.counter_cache_column
+        name         = self.name
+
+        method_name = "belongs_to_counter_cache_after_create_for_#{name}"
+        mixin.redefine_method(method_name) do
+          record = send(name)
+          record.class.increment_counter(cache_column, record.id) unless record.nil?
+        end
+        model.after_create(method_name)
+
+        method_name = "belongs_to_counter_cache_before_destroy_for_#{name}"
+        mixin.redefine_method(method_name) do
+          record = send(name)
+
+          if record && !self.destroyed?
+            record.class.decrement_counter(cache_column, record.id)
+          end
+        end
+        model.before_destroy(method_name)
+      end
+  end
+end
+```
+
+---
+
+It was essentially generating this code:
+
+```ruby
+class Product < ApplicationRecord
+  belongs_to :collections
+
+  after_create :increment_counter_cache_for_collection
+  before_destroy :decrement_counter_cache_for_collection
+
+  private
+
+  def increment_counter_cache_for_collection
+    Collection.increment_counter(:products_count, collection.id)
+  end
+
+  def decrement_counter_cache_for_collection
+    Collection.decrement_counter(:products_count, collection.id)
+  end
+end
+```
+
+The logic appeared sound. My only theory at this point was that since they were implemented as model callbacks,
+perhaps some of our code was bypassing callbacks.
+
+But a careful audit of the application didn't reveal anything like that, so I was back to square one.
+
+---
+
+### Searching for more clues.
+
+Looking at the faulty records in production, the counter caches were always lower than they should be, never higher. So the issue must be on the `destroy` code path.
+
+Perhaps it was indeed a concurrency issue. Let's try to reproduce it locally.
+
+```bash
+$ rails new counter_caches_debug
+$ rails generate scaffold Collection title:string products_count:integer
+$ rails generate scaffold Product collection:references
+$ echo 'worker_processes 8' > config/unicorn.production.rb
+$ RAILS_ENV=production bundle exec unicorn -c config/unicorn.production.rb config.ru
+```
+
+
+---
+
+Then I created some records, and started mashing my mouse on the destroy button, until this happened
+
+![](images/counter_cache_local_repro.png#half-height)
+
+
+---
+
+![](images/counter_cache_local_repro_logs2.png#fit-width)
+
+On the above logs, we can see that both process load the product, then they both delete it.
+
+If we serialize what happened, it looks like this:
+
+```ruby
+product_1 = Product.find(4)
+product_2 = Product.find(4)
+
+product_1.destroy
+product_2.destroy
+```
+
+---
+
+The problem is that the `DELETE` query will succeed regardless of whether the record still exist or not.
+
+```sql
+mysql> DELETE FROM products WHERE products.id = 4;
+Query OK, 1 row affected (0.01 sec)
+
+mysql> DELETE FROM products WHERE products.id = 4;
+Query OK, 0 rows affected (0.00 sec)
+```
+
+So if the `DELETE` succeeds, the transaction is committed, and the counter cache decrementation also succeeds, causing the desynchronisation.
+
+---
+
+
+
+---
+
+# Thanks
+
+    </textarea>
+    <script src="./remark.js">
+    </script>
+    <script>
+      var slideshow = remark.create({
+        'highlightStyle': 'solarized_dark'
+      });
+    </script>
+  </body>
+</html>
