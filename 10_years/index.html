@@ -253,6 +253,7 @@ Then I created some records, and started mashing my mouse on the destroy button,
 
 ![](images/counter_cache_local_repro.png#half-height)
 
+Anecdote: the race condition became too small on modern hardware and software to reproduce like I did back in the day, so I had to sprinkle some sleep statements.
 
 ---
 
@@ -285,6 +286,170 @@ Query OK, 0 rows affected (0.00 sec)
 So if the `DELETE` succeeds, the transaction is committed, and the counter cache decrementation also succeeds, causing the desynchronisation.
 
 ---
+
+A failing test case can easily be crafted:
+
+```ruby
+test "sequential delete of the same record only decrement counter once" do
+  collection = collections(:featured)
+
+  first_collect = Collect.find(collects(:first).id)
+  second_collect = Collect.find(collects(:first).id)
+
+  assert_difference -> { collection.reload.products_count }, -1 do
+    first_collect.destroy
+    second_collect.destroy
+  end
+end
+```
+
+Now that we have a fast feedback loop, we can work on a fix.
+
+---
+
+But before that, it's preferable to search for existing solutions.
+
+![](images/counter_caches_lock_pr.png#fit-height)
+
+Turns out there was one submitted more than a year earlier, but it wasn't merged because the performance impact was too big.
+
+Surely, we can find something better 🤔
+
+---
+
+When playing directly with the MySQL shell, it hit me that MySQL tells us how many records were actually deleted.
+
+```sql
+mysql> DELETE FROM products WHERE products.id = 4;
+Query OK, 1 row affected (0.01 sec)
+
+mysql> DELETE FROM products WHERE products.id = 4;
+Query OK, 0 rows affected (0.00 sec)
+```
+
+If we could access this count from Ruby, we could tell whether the record was already deleted, and just not issue the decrement.
+
+---
+
+Turns out Active Record already has this information:
+
+```ruby
+>> Product.count
+=> 1
+>> Product.delete_all
+=> 1
+>> Product.delete_all
+=> 0
+```
+
+And ultimately `ActiveRecord::Base#destroy` calls `delete_all`:
+
+```ruby
+module ActiveRecord
+  module Persistence
+    def destroy
+      raise ReadOnlyRecord if readonly?
+      destroy_associations
+      destroy_row if persisted?
+      @destroyed = true
+      freeze
+    end
+
+    private
+
+    def destroy_row
+      relation_for_destroy.delete_all # 0 or 1
+    end
+  end
+end
+```
+---
+
+The problem is that since counter caches are implemented as model callbacks, they don't have access to this information.
+
+So we need to refactor them to proper first class features:
+
+```ruby
+module ActiveRecord
+  module CounterCache
+    private
+
+    def destroy_row
+      affected_rows = super
+
+      if affected_rows > 0
+        # snip... decrement counters
+      end
+
+      affected_rows
+    end
+  end
+end
+```
+
+---
+
+We converted this fix into a monkey patch because.
+
+  - We were quite sure we had a proper fix, but was it the only bug?
+  - We also needed the fix now, and not for the next release of Rails.
+  
+After several months, we still couldn't notice any more desynchronisations, so we started using the counter cache again,
+solving the slow `COUNT` query issue.
+
+![](images/active_record_count_revert.png#fit-width)
+
+
+---
+
+But now it was time to fix Rails
+
+![](images/counter_cache_pr.png#fit-height)
+
+It felt really good submitting a clean solution for a long standing bug.
+
+---
+
+However Aaron would see it that way 😞
+
+![](images/counter_cache_pr_tenderlove_solution.png#fit-height)
+
+Aaron didn't properly understand the bug nor the fix, I was a bit disapointed/shocked.
+
+---
+
+My English and communication skils in general weren't great at the time...
+
+![](images/counter_cache_pr_stupid_answer.png#fit-height)
+
+I answered quite stupidly.
+
+---
+
+Now that I maintains lots of projects, including Rails, I better understand how this dynamic works.
+
+I've just spent days thinking about this problem, Aaron had much less (fresh) context on the feature and issue than I did.
+
+Maintainers can be wrong, especially on large projects like Rails where there isn't a single maintainer that either wrote or reviewed all the code.
+
+You've identified and fixed a bug, your head is full of context, the challenge is to identify the relevant information and write it down in the PR to share
+it with the maintainer.
+
+I didn't do a good job of that at first.
+
+---
+
+Lucky for me, Aaron is a nice person, so He simply joked about my blunder.
+
+![](images/counter_cache_pr_joke.png#fit-height)
+
+Many maintainers wouldn't have taken it this well.
+
+
+---
+
+# Takeaways
+
 
 
 
