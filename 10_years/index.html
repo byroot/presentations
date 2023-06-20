@@ -445,12 +445,95 @@ Lucky for me, Aaron is a nice person, so He simply joked about my blunder.
 
 Many maintainers wouldn't have taken it this well.
 
+The PR was ultimately merged, as well as a couple followups.
 
 ---
 
 # Takeaways
 
+Aside from the technical aspects of this fix, what I'm trying to convey here is:
 
+  - Think of your dependencies like code written by a colleague, you should be ready to debug and fix it yourself.
+  - This also implies that fixing a bug in a dependency shouldn't necessitate any kind of authorization from a manager.
+  - Step one of debugging is to get a reproduction.
+  - Worst case if you can't figure out the bug yourself, the reproduction will make it much easier for the maintainers to fix it.
+  - Communication is extremely important. You must be able to transmit everything you understood to the maintainer.
+  - Try to be nice. Make the maintainer want to help you.
+
+---
+
+### 9 years later
+
+A toot for help
+
+![](images/mastodon_toot_help.png#fit-width)
+
+I had a bit of time in front of me, so why not.
+
+---
+
+![](images/mastodon_issue.png#fit-width)
+
+
+---
+
+```ruby
+NoMethodError (undefined method `fetch_value' for nil:NilClass):
+
+lib/active_record/attribute_methods/read.rb:36:in `_read_attribute'
+lib/active_record/attribute_methods/primary_key.rb:19:in `id'
+lib/active_record/core.rb:648:in `hash'
+<internal:marshal>:34:in `load'
+lib/active_support/core_ext/marshal.rb:8:in `load'
+lib/active_support/cache.rb:874:in `uncompress'
+lib/active_support/cache.rb:796:in `value'
+lib/active_support/cache/redis_cache_store.rb:377:in `block in read_multi_mget'
+lib/active_support/cache/redis_cache_store.rb:373:in `each'
+lib/active_support/cache/redis_cache_store.rb:373:in `each_with_object'
+lib/active_support/cache/redis_cache_store.rb:373:in `read_multi_mget'
+lib/active_support/cache/redis_cache_store.rb:209:in `block in read_multi'
+lib/active_support/cache.rb:726:in `block in instrument'
+lib/active_support/notifications.rb:205:in `instrument'
+lib/active_support/cache.rb:726:in `instrument'
+lib/active_support/cache/redis_cache_store.rb:208:in `read_multi'
+app/controllers/concerns/cache_concern.rb:37:in `cache_collection'
+```
+
+```ruby
+module ActiveRecord
+  module AttributeMethods
+    module Read
+      def read_attribute(attr_name, &block)
+        name = attr_name.to_s
+        name = self.class.attribute_aliases[name] || name
+
+        name = @primary_key if name == "id" && @primary_key
+        @attributes.fetch_value(name, &block)
+      end
+    end
+  end
+end
+```
+
+---
+
+![](images/mastodon_bad_explanation.png#fit-height)
+
+I went quickly over the issue assuming it was a simple Rails limitation.
+
+---
+
+But quickly realized I was wrong:
+
+![](images/mastodon_answer_marshal_load.png#fit-height)
+
+Again, I was initially too overconfident.
+
+My initial theory didn't explain why it was a Ruby 3.2 only bug, so it couldn't be it.
+
+At this stage the obvious suspect was a change in `Marshal`, but the diff didn't show anything relevant.
+
+Note: I don't think I ever figured a bug looking at a git log longer than a handful of commits.
 
 
 ---
