@@ -535,6 +535,74 @@ At this stage the obvious suspect was a change in `Marshal`, but the diff didn't
 
 Note: I don't think I ever figured a bug looking at a git log longer than a handful of commits.
 
+---
+
+As more information come in, we can reduce the possibilities
+
+![](images/mastodon_error_in_marshal_dump.png#fit-height)
+
+At this stage, it's extremely likely that the problem is in `Marshal.dump` on Ruby 3.2.
+
+Somehow, it now behave differently.
+
+---
+
+### Quick note on Marshal
+
+Marshal is a "stack" based format:
+
+```ruby
+class Foo
+  def initialize
+    @attr1 = 1
+    @attr2 = 2
+  end
+end
+
+p Marshal.dump(Foo.new) # => "\x04\bo:\bFoo\a:\v@attr1i\x06:\v@attr2i\a"
+```
+
+
+```ruby
+[
+  "\x04\x08", # Marshal prefix
+  "o", # Object
+  ":\x08Foo", # Class name as symbol. `:` mark the symbol followed by the size (8 == 4 << 1)
+  "\x07", # Number of instance variables (2 + 0x05).
+  ":\v@attr1", # First instance variable name.
+  "i\x06", # 1
+  ":\v@attr2", # Second instance variable name.
+  "i\x07" # 2
+]
+```
+
+Marshal read these instructions one by one, and apply them sequentially.
+
+---
+
+```ruby
+Marshal.load("\x04\bo:\bFoo\a:\v@attr1i\x06:\v@attr2i\a")
+```
+
+Is similar to:
+```ruby
+object = Object.const_get(:Foo).allocate
+object.instance_variable_set(:@attr1, 1)
+object.instance_variable_set(:@attr2, 2)
+object
+```
+
+The key thing to understand here is that `Marshal` doesn't load objects atomically.
+
+At this stage the theory is that what is happening is that something cause Marshal to call `#hash`
+before it has finished to initialize the Active Record model.
+
+```ruby
+object = Object.const_get(:Status).allocate
+object.instance_variable_set(:@attr1, 1)
+object.hash # raise NoMethodError (undefined method `fetch_value' for nil:NilClass)
+object.instance_variable_set(:@attributes, active_record_attributes)
+```
 
 ---
 
