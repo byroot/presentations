@@ -564,9 +564,9 @@ At this stage, I suspect we're running in a case like this:
 ```ruby
 class Status
   def initialize
-    @relations = nil
+    @association_cache = nil
     @attributes = { id: 42 }
-    @relations = { self => 1 }
+    @association_cache = { self => 1 }
   end
 
   def hash
@@ -574,7 +574,7 @@ class Status
   end
 end
 
-Status.new.instance_variables # => [:@relations, :@attributes]
+Status.new.instance_variables # => [:@association_cache, :@attributes]
 payload = Marshal.dump(Status.new)
 Marshal.load(payload) # NoMethodError (undefined method `fetch' for nil:NilClass)
 ```
@@ -737,8 +737,26 @@ end
 
 ---
 
-![](images/mastodon_false_hope.png#fit-width)
+![](images/mastodon_almost_repro.png#fit-width)
 
+---
+
+![](images/mastodon_real_repro.png#fit-width)
+
+---
+
+# SHAPE_TOO_COMPLEX
+
+Shapes are a performance optimization that allows accessing and setting instance variables much faster in most cases.
+
+However, when a class initialize its instance variables in many different orders, the performance of shapes quickly get worse.
+
+So when such a case is detected, the offending class is marked with `SHAPE_TOO_COMPLEX`, and no longer uses shapes.
+
+Instead it stores instance variables in an `id_table`, which is an **unordered** hash.
+
+That's why the bug was so hard to reproduce, it would only happen after the `Status` class was marked as `SHAPE_TOO_COMPLEX`,
+which requires to execute many different paths in the application.
 
 ---
 
