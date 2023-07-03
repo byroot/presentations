@@ -547,6 +547,42 @@ Somehow, it now behave differently.
 
 ---
 
+Someone shares a broken Marshal payload, allowing to narrow the issue further
+
+![](images/mastodon_broken_payload.png#fit-width)
+
+---
+
+The theory is now that attributes are improperly ordered:
+
+![](images/mastodon_broken_payload_comment.png#fit-width)
+
+---
+
+At this stage, I suspect we're running in a case like this:
+
+```ruby
+class Status
+  def initialize
+    @relations = nil
+    @attributes = { id: 42 }
+    @relations = { self => 1 }
+  end
+
+  def hash
+    @attributes.fetch(:id)
+  end
+end
+
+Status.new.instance_variables # => [:@relations, :@attributes]
+payload = Marshal.dump(Status.new)
+Marshal.load(payload) # NoMethodError (undefined method `fetch' for nil:NilClass)
+```
+
+To understand this snippet we need to explain how Marshal and instance variables works.
+
+---
+
 ### Quick note on Marshal
 
 Marshal is a "stack" based format:
@@ -603,6 +639,106 @@ object.instance_variable_set(:@attr1, 1)
 object.hash # raise NoMethodError (undefined method `fetch_value' for nil:NilClass)
 object.instance_variable_set(:@attributes, active_record_attributes)
 ```
+
+And the most likely reason for `#hash` to be called, is the object being used as a Hash key.
+
+---
+
+# Ruby instance variables ordering
+
+```ruby
+class A
+  def initialize
+    @a, @b = 1, 2
+  end
+end
+
+A.new.instance_variables # => [:@a, :@b]
+
+class B
+  def initialize
+    @b, @a = 2, 1
+  end
+end
+
+B.new.instance_variables # => [:@b, :@a]
+```
+
+---
+
+# Ruby 3.2 Object Shapes
+
+```ruby
+class A
+  def ordered = (@a, @b = 1, 2)
+  def inverse = (@b, @a = 2, 1)
+end
+
+p RUBY_VERSION
+p A.new.tap(&:ordered).instance_variables
+p A.new.tap(&:inverse).instance_variables
+```
+
+```ruby
+"3.1.3"
+[:@b, :@a]
+[:@b, :@a]
+```
+
+```ruby
+"3.2.2"
+[:@b, :@a]
+[:@a, :@b]
+```
+
+Ruby 3.2 significantly changed how instance variables are ordered. It's no longer a per class ordering, but a per instance ordering.
+
+I just happened to know that because I worked closely with Aaron and Jemma who implemented this change.
+
+---
+
+```ruby
+class Status
+  def initialize
+    @relations = nil
+    @attributes = { id: 42 }
+    @relations = { self => 1 }
+  end
+
+  def hash
+    @attributes.fetch(:id)
+  end
+end
+
+Status.new.instance_variables # => [:@relations, :@attributes]
+payload = Marshal.dump(Status.new)
+Marshal.load(payload) # NoMethodError (undefined method `fetch' for nil:NilClass)
+```
+
+Now that we pinpointed a significant difference between Ruby 3.2 and older versions that can
+explain what we're seeing, I went to look for a codepath in Active Record that could cause
+an instance to have instance variables defined in a different order.
+
+---
+
+We knew the two variables that matter are `@attributes` and `@association_cache`, so I greped
+for all the places they were assigned and found this:
+
+```ruby
+module ActiveRecord
+  module Associations
+    def initialize_dup(*)
+      @association_cache = {}
+      super
+    end
+  end
+end
+```
+
+---
+
+![](images/mastodon_false_hope.png#fit-width)
+
 
 ---
 
