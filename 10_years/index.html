@@ -756,7 +756,207 @@ So when such a case is detected, the offending class is marked with `SHAPE_TOO_C
 Instead it stores instance variables in an `id_table`, which is an **unordered** hash.
 
 That's why the bug was so hard to reproduce, it would only happen after the `Status` class was marked as `SHAPE_TOO_COMPLEX`,
-which requires to execute many different paths in the application.
+which requires executing many different paths in the application first.
+
+---
+
+# Fixing the bug(s)
+
+- Arguably this is just a bug in Ruby 3.2 and should simply be fixed there.
+- However Mastodon users were in need of a quick fix or work-around. Waiting for Ruby 3.2.3 wouldn't cut it.
+- Caching Active Record instance in `Rails.cache` relying on such brittle behavior is a liability.
+
+So to me this was the conjunction of two bugs, and two fixes were needed.
+
+---
+
+# Avoiding the bug in Mastodon
+
+One thing that hit me was that Shopify was running Ruby 3.2 for 3 months now, and we never ran into this bug.
+
+The reason is we stopped using `Marshal` as a serializer for `Rails.cache`, as it made it way too easy to make this kind of mistake.
+
+Instead we use https://github.com/Shopify/paquito
+
+So the proper short term fix for Mastodon was to integrate paquito or do something similar.
+
+---
+
+# Dedicated Active Record encoder
+
+```ruby
+Rails.cache.write(item, ActiveRecordCoder.dump(item), namespace: 'v2')
+```
+
+```ruby
+module ActiveRecordCoder
+  class << self
+    def dump(record)
+      instances = InstanceTracker.new
+      serialized_associations = serialize_associations(record, instances)
+      serialized_records = instances.map { |r| serialize_record(r) }
+      [serialized_associations, *serialized_records]
+    end
+
+    def load(payload)
+      instances = InstanceTracker.new
+      serialized_associations, *serialized_records = payload
+      serialized_records.each { |attrs| instances.push(deserialize_record(*attrs)) }
+      deserialize_associations(serialized_associations, instances)
+    end
+  end
+end
+```
+
+---
+
+We still use Marshal, but we make sure not to serialize any complex type:
+
+```ruby
+def serialize_record(record)
+  arguments = [record.class.name, record.attributes_for_database]
+  arguments << true if record.new_record?
+  arguments
+end
+```
+
+Full implementation at https://github.com/mastodon/mastodon/pull/24142
+
+---
+
+![](images/mastodon_active_record_coder.png#fit-width)
+
+As a side benefits, the payload size was cut in half, both serialization and deserialization were made significantly faster.
+
+Now that Mastodon users had a quick fix, I could work on the more general fixes on Rails and Ruby.
+
+---
+
+# Fixing it on the Rails side for everyone
+
+Serialization:
+
+```ruby
+def marshal_dump
+  payload = [attributes_for_database, new_record?]
+
+  cached_associations = self.class.reflect_on_all_associations.select do |reflection|
+    association_cached?(reflection.name)
+  end
+
+  unless cached_associations.empty?
+    payload << cached_associations.map do |reflection|
+      [reflection.name, association(reflection.name).target]
+    end
+  end
+
+  payload
+end
+```
+
+---
+
+# Fixing it on the Rails side for everyone
+
+Deserialization:
+
+```ruby
+def marshal_load(state)
+  attributes_from_database, new_record, associations = state
+
+  attributes = self.class.attributes_builder.build_from_database(attributes_from_database)
+  init_with_attributes(attributes, new_record)
+
+  if associations
+    associations.each do |name, target|
+      association(name).target = target
+    rescue ActiveRecord::AssociationNotFoundError
+      # the association no longer exist, we can just skip it.
+    end
+  end
+end
+```
+
+---
+
+# Fixing it on the Rails side for everyone
+
+Some neat performance improvements.
+
+Payload size if 3-4x smaller:
+
+```sh
+$ ls -lh test/support/marshal_compatibility_fixtures/PostgreSQL/
+1.7K rails_6_1_topic.dump
+4.1K rails_6_1_topic_associations.dump
+579B rails_7_1_topic.dump
+806B rails_7_1_topic_associations.dump
+```
+
+Serialization and Deserialization are over 2x faster:
+
+```ruby
+dump 7.1:    34382.8 i/s
+dump 6.1:    14392.6 i/s - 2.39x  slower
+```
+
+```ruby
+load 7.1:    29420.8 i/s
+load 6.1:    13827.2 i/s - 2.13x  slower
+```
+
+---
+
+# Fixing it on the Rails side for everyone
+
+However we can't directly change the format, as users need to be able to rollout the upgrade.
+
+So after upgrading to `7.1`, it has to be enabled:
+
+```ruby
+Rails.application.config.active_record.marshalling_format_version = 7.1
+```
+
+or
+
+```ruby
+# config/application.rb
+
+config.load_defaults 7.1
+```
+
+Pull Request: https://github.com/rails/rails/pull/47747
+
+---
+
+# Fixing it on the Ruby side for everyone
+
+![](images/obj_too_complex_shape_pr.png#fit-width)
+
+---
+
+# Fixing it on the Ruby side for everyone
+
+The PR is much longer, but the core of the fix is here:
+
+![](images/obj_too_complex_shape_fix.png#fit-width)
+
+`rb_id_table` is an unordered hash table with static symbol keys.
+
+`st_table` is a generic, ordered, hash table.
+
+This fix is marked to be backported for Ruby 3.2.3.
+
+---
+
+# Takeaways
+
+- Being knowledgeable or able to investigate lower layers (MRI) can be extremely helpful.
+- Semi-deterministic behavior should be avoided at all cost.
+- Beware of `Marshal`.
+  - Avoid persisting payloads generated by `Marshal`, even in caches.
+  - If you can't, then avoid serializing complex types with it.
+-
 
 ---
 
