@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>A Decade of Rails Contributions</title>
+    <title>A Decade of Rails Bug Fixes</title>
     <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
     <style type="text/css">
       @import url(https://fonts.googleapis.com/css?family=Yanone+Kaffeesatz);
@@ -62,13 +62,31 @@
 
 class: center, middle
 
-# A Decade of Rails Contributions
+# A Decade of Rails Bug Fixes
 
 ### Jean Boussier
 
+v0.0.0
+
 ---
 
-### TODO: presentation, whoami
+### TODO: presentation, whoami, etc.
+
+Depending on how much time is left
+
+---
+
+# A Decade of Rails Bug Fixes
+
+I've been contributing to Rails for about 10 years now.
+
+In this talk I'll show how I fixed two bugs, one 10 years ago, and one a few months back.
+
+---
+
+# Bug #1: Counter Caches Desynchronization
+
+February 2014
 
 ---
 
@@ -410,7 +428,7 @@ It felt really good submitting a clean solution for a long standing bug.
 
 ---
 
-However Aaron would see it that way 😞
+However Aaron wouldn't see it that way 😞
 
 ![](images/counter_cache_pr_tenderlove_solution.png#fit-height)
 
@@ -451,6 +469,16 @@ The PR was ultimately merged, as well as a couple followups.
 
 # Takeaways
 
+Debugging is very much like applying the scientific method.
+
+You observe the bug, theorize what could cause such behavior, then experiment to try to prove or disprove that theory.
+
+![](images/scientific_method.png#fit-height)
+
+---
+
+# Takeaways
+
 Aside from the technical aspects of this fix, what I'm trying to convey here is:
 
   - Think of your dependencies like code written by a colleague, you should be ready to debug and fix it yourself.
@@ -458,7 +486,13 @@ Aside from the technical aspects of this fix, what I'm trying to convey here is:
   - Step one of debugging is to get a reproduction.
   - Worst case if you can't figure out the bug yourself, the reproduction will make it much easier for the maintainers to fix it.
   - Communication is extremely important. You must be able to transmit everything you understood to the maintainer.
-  - Try to be nice. Make the maintainer want to help you.
+  - Try to be nice and agreable. Make the maintainer want to help you.
+
+---
+
+# Bug #2: Mastodon's cache corruption
+
+March 2023
 
 ---
 
@@ -562,6 +596,18 @@ The theory is now that attributes are improperly ordered:
 At this stage, I suspect we're running in a case like this:
 
 ```ruby
+object = Object.const_get(:Status).allocate
+object.hash # raise NoMethodError (undefined method `fetch_value' for nil:NilClass)
+```
+And the most likely reason for `#hash` to be called, is the object being used as a Hash key.
+
+The most likely place where a model is used as a Hash key, is the "association cache".
+
+---
+
+Overall the theory is that something like this is happening:
+
+```ruby
 class Status
   def initialize
     @association_cache = nil
@@ -578,6 +624,9 @@ Status.new.instance_variables # => [:@association_cache, :@attributes]
 payload = Marshal.dump(Status.new)
 Marshal.load(payload) # NoMethodError (undefined method `fetch' for nil:NilClass)
 ```
+
+This snippet is an overly simplified outline of what I believe the bug is. It's not using Active Record
+but it helps confirm that if Active Record is indeed doing something similar, it's likely our bug.
 
 To understand this snippet we need to explain how Marshal and instance variables works.
 
@@ -630,21 +679,23 @@ object
 
 The key thing to understand here is that `Marshal` doesn't load objects atomically.
 
-At this stage the theory is that what is happening is that something cause Marshal to call `#hash`
-before it has finished to initialize the Active Record model.
+So the theory is that Marshal uses the Active Record model as a key before it's fully initialized:
 
 ```ruby
+hash = {}
 object = Object.const_get(:Status).allocate
 object.instance_variable_set(:@attr1, 1)
-object.hash # raise NoMethodError (undefined method `fetch_value' for nil:NilClass)
+hash[object] = something # raise NoMethodError (undefined method `fetch_value' for nil:NilClass)
 object.instance_variable_set(:@attributes, active_record_attributes)
 ```
 
-And the most likely reason for `#hash` to be called, is the object being used as a Hash key.
+And that somehow, on older Ruby implementations, `@attributes` is set earlier.
 
 ---
 
 # Ruby instance variables ordering
+
+`Marshal` preserve the instance variables order. So we need to understand how Ruby order them in the first place.
 
 ```ruby
 class A
@@ -668,6 +719,11 @@ B.new.instance_variables # => [:@b, :@a]
 
 # Ruby 3.2 Object Shapes
 
+
+Ruby 3.2 significantly changed how instance variables are stored and ordered.
+
+It's no longer a per class ordering, but a per instance ordering.
+
 ```ruby
 class A
   def ordered = (@a, @b = 1, 2)
@@ -690,8 +746,6 @@ p A.new.tap(&:inverse).instance_variables
 [:@b, :@a]
 [:@a, :@b]
 ```
-
-Ruby 3.2 significantly changed how instance variables are ordered. It's no longer a per class ordering, but a per instance ordering.
 
 I just happened to know that because I worked closely with Aaron and Jemma who implemented this change.
 
@@ -764,7 +818,7 @@ which requires executing many different paths in the application first.
 
 - Arguably this is just a bug in Ruby 3.2 and should simply be fixed there.
 - However Mastodon users were in need of a quick fix or work-around. Waiting for Ruby 3.2.3 wouldn't cut it.
-- Caching Active Record instance in `Rails.cache` relying on such brittle behavior is a liability.
+- But also, caching Active Record instance in `Rails.cache` relying on such brittle behavior is a liability.
 
 So to me this was the conjunction of two bugs, and two fixes were needed.
 
@@ -808,9 +862,11 @@ module ActiveRecordCoder
 end
 ```
 
+I basically took code from Paquito and simplified it.
+
 ---
 
-We still use Marshal, but we make sure not to serialize any complex type:
+It still use Marshal, but we make sure not to serialize any complex type:
 
 ```ruby
 def serialize_record(record)
@@ -826,7 +882,7 @@ Full implementation at https://github.com/mastodon/mastodon/pull/24142
 
 ![](images/mastodon_active_record_coder.png#fit-width)
 
-As a side benefits, the payload size was cut in half, both serialization and deserialization were made significantly faster.
+We also got some side benefits, the payload size was cut in half and both serialization and deserialization were made significantly faster.
 
 Now that Mastodon users had a quick fix, I could work on the more general fixes on Rails and Ruby.
 
@@ -834,7 +890,7 @@ Now that Mastodon users had a quick fix, I could work on the more general fixes 
 
 # Fixing it on the Rails side for everyone
 
-Serialization:
+Ruby objects can control how they are serialized by Marshal by defining `marshal_dump` and `marshal_load` methods.
 
 ```ruby
 def marshal_dump
@@ -857,8 +913,6 @@ end
 ---
 
 # Fixing it on the Rails side for everyone
-
-Deserialization:
 
 ```ruby
 def marshal_load(state)
@@ -883,7 +937,7 @@ end
 
 Some neat performance improvements.
 
-Payload size if 3-4x smaller:
+Payload size is 3-4x smaller:
 
 ```sh
 $ ls -lh test/support/marshal_compatibility_fixtures/PostgreSQL/
@@ -931,6 +985,8 @@ Pull Request: https://github.com/rails/rails/pull/47747
 
 # Fixing it on the Ruby side for everyone
 
+Aaron and Jemma took care of the Ruby patch
+
 ![](images/obj_too_complex_shape_pr.png#fit-width)
 
 ---
@@ -951,12 +1007,16 @@ This fix is marked to be backported for Ruby 3.2.3.
 
 # Takeaways
 
-- Being knowledgeable or able to investigate lower layers (MRI) can be extremely helpful.
-- Semi-deterministic behavior should be avoided at all cost.
+- In 9 years, I still haven't improved on my overconfidence 😅. I still jump to conclusions too soon...
+- It is much harder to debug a problem that has been reported to you rather than one you observed yourself.
+  - That is one huge advantage of Free Software / Open Source, you can directly debug yourself rather than to do a back and forth with your vendor.
 - Beware of `Marshal`.
   - Avoid persisting payloads generated by `Marshal`, even in caches.
   - If you can't, then avoid serializing complex types with it.
--
+- Being knowledgeable or able to investigate lower layers (e.g. Ruby) can be extremely helpful.
+- Semi-deterministic behavior should be avoided at all cost.
+- Not every Ruby behavior is intentional and guaranteed to stay stable. Some things are implementation dependent and may behave differently on JRuby, TruffleRuby or future versions of MRI.
+
 
 ---
 
